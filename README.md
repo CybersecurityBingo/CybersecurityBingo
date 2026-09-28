@@ -1,2 +1,2 @@
-# Cloud-Storage-Security-and-Privacy
-Local tool for cloud storage file risk and AI-Assisted file sensitivity flagging
+# Cybersecurity Bingo for CWRU
+Creating a scaled webapp for running unfraudable bingo now and in future events.
