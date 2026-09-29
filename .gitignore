@@ -1,0 +1,23 @@
+# Python / Flask
+venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+instance/
+
+# Node / React
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/launch.json
