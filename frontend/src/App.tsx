@@ -13,7 +13,7 @@ function App() {
   const [data, setData] = useState({ msg: "", date: "" });
 
   useEffect(() => {
-    fetch("/api/data")
+    fetch(`${import.meta.env.VITE_API_URL}/api/data`)
       .then((res) => res.json() as Promise<DataResponse>)
       .then((json) => setData({ msg: json.msg, date: json.date}))
       .catch((err) => console.error("Fetch failed:", err));

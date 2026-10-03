@@ -1,7 +1,8 @@
-from flask import Flask, jsonify
+from flask import Flask, CORS, jsonify
 from datetime import datetime
 
 app = Flask(__name__)
+CORS(app, origins=["*"])
 
 @app.route("/api/data")
 def home():
