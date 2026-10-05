@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import "./App.css";
 import { useAuth } from "./AuthContext";
 import { JankLoginButton, JankSignupButton } from "./JankButtons";
+import BingoGrid from "./components/BingoGrid";
 
 interface DataResponse {
   msg: string;
@@ -30,6 +31,9 @@ function App() {
         <br />
         <JankSignupButton />
       </header>
+      <div className="Grid">
+        <BingoGrid />
+      </div>
     </div>
   );
 }
