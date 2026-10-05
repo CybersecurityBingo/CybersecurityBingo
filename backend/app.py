@@ -13,7 +13,7 @@ def add_cors_headers(response):
 @app.route("/api/data")
 def home():
     return jsonify(
-        msg="hello world",
+        msg="hello world!",
         date=datetime.now().isoformat(timespec="seconds"),
     )
 
