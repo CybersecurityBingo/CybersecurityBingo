@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request
 from datetime import datetime
+from bingocard import squares
 
 app = Flask(__name__)
 
@@ -17,5 +18,10 @@ def home():
         date=datetime.now().isoformat(timespec="seconds"),
     )
 
+@app.route("/api/squares")
+def get_squares():
+    return jsonify(squares)
+
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5001)
+    app.run(debug=True, port=5000)
