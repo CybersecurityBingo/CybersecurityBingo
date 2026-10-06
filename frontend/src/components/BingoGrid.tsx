@@ -7,14 +7,10 @@ function BingoGrid() {
   useEffect(() => {
     fetch(`${import.meta.env.VITE_API_URL}/api/squares`)
       .then((res) => {
-        if (!res.ok) {
-          throw new Error("Failed to fetch bingo squares");
-        }
+        if (!res.ok) {throw new Error("Failed to fetch bingo squares");}
         return res.json();
       })
-      .then((data: string[]) => {
-        setSquares(data);
-      })
+      .then((data: string[]) => {setSquares(data);})
       .catch((err) => {
         console.error("Failed to fetch squares:", err);
       })
