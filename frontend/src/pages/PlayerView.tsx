@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { api, errorMessage, errorStatus } from "../api";
 import usePolling from "../usePolling";
 import { useAuth } from "../AuthContext";
 import AccountBar from "../components/AccountBar";
 import BingoCard from "../components/BingoCard";
+import AuthForm from "../components/AuthForm";
 import QuestionFeed from "../components/QuestionFeed";
 import type { BingoClaim, PlayerState } from "../types";
 
@@ -22,10 +23,33 @@ const store = {
 };
 
 export default function PlayerView() {
+  const { user, loading: authLoading, configured } = useAuth();
   const [playerId, setPlayerId] = useState<string | null>(store.get);
   const [state, setState] = useState<PlayerState | null>(null);
   const [connError, setConnError] = useState("");
   const [claim, setClaim] = useState<BingoClaim | null>(null);
+
+  useEffect(() => {
+    async function autoJoin() {
+      if (!user || playerId) return;
+
+      try {
+        const displayName = user.email?.split("@")[0] || "Player";
+        const { player_id } = await api<{ player_id: string }>("/join", {
+          method: "POST",
+          body: { name: displayName },
+        });
+
+        store.set(player_id);
+        setPlayerId(player_id);
+        setConnError("");
+      } catch (err) {
+        setConnError(errorMessage(err));
+      }
+    }
+
+    autoJoin();
+  }, [user, playerId]);
 
   usePolling(
     async () => {
@@ -34,7 +58,6 @@ export default function PlayerView() {
         setConnError("");
       } catch (e) {
         if (errorStatus(e) === 404) {
-          // Game was reset or the ID is stale - send them back to the join screen.
           store.clear();
           setPlayerId(null);
           setState(null);
@@ -48,23 +71,41 @@ export default function PlayerView() {
     Boolean(playerId)
   );
 
-  if (!playerId) {
+  if (!configured) {
     return (
-      <JoinForm
-        onJoined={(id) => {
-          store.set(id);
-          setPlayerId(id);
-        }}
-      />
+      <main className="page center">
+        <p className="banner warn">Firebase is not configured. Check your client .env variables.</p>
+      </main>
     );
   }
 
-  if (!state) {
-    return <main className="page center"><p className="muted">{connError || "Loading your card…"}</p></main>;
+  if (authLoading) {
+    return (
+      <main className="page center">
+        <p className="muted">Checking authentication session…</p>
+      </main>
+    );
   }
 
+  if (!user) {
+    return (
+      <main className="page center">
+        <AuthForm />
+        <ServerStatus />
+      </main>
+    );
+  }
+
+  if (!playerId || !state) {
+    return (
+      <main className="page center">
+        <p className="muted">{connError || "Loading your bingo card…"}</p>
+      </main>
+    );
+  }
+
+  // Action handlers
   async function toggle(index: number) {
-    // Optimistic update so the square responds instantly.
     setState((s) => {
       if (!s) return s;
       const marks = new Set(s.marks);
@@ -73,7 +114,10 @@ export default function PlayerView() {
       return { ...s, marks: [...marks] };
     });
     try {
-      const { marks } = await api<{ marks: number[] }>(`/player/${playerId}/mark`, { method: "POST", body: { index } });
+      const { marks } = await api<{ marks: number[] }>(`/player/${playerId}/mark`, {
+        method: "POST",
+        body: { index },
+      });
       setState((s) => (s ? { ...s, marks } : s));
     } catch (e) {
       setConnError(errorMessage(e));
@@ -134,51 +178,6 @@ export default function PlayerView() {
   );
 }
 
-function JoinForm({ onJoined }: { onJoined: (id: string) => void }) {
-  const { user } = useAuth();
-  const [name, setName] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  // Signed in with a Firebase account? Suggest a name from it.
-  useEffect(() => {
-    if (user && !name) setName((user.displayName || user.email?.split("@")[0] || "").slice(0, 30));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const { player_id } = await api<{ player_id: string }>("/join", { method: "POST", body: { name } });
-      onJoined(player_id);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <main className="page center">
-      <form className="panel narrow" onSubmit={submit}>
-        <h1>White Hat Bingo</h1>
-        <p className="muted">Enter your name to get a card.</p>
-        <label htmlFor="name">Name</label>
-        <input id="name" value={name} maxLength={30} autoFocus onChange={(e) => setName(e.target.value)} />
-        {error && <p className="banner warn">{error}</p>}
-        <button className="primary" disabled={busy || !name.trim()}>
-          {busy ? "Joining…" : "Get my card"}
-        </button>
-        <AccountBar />
-        <ServerStatus />
-      </form>
-    </main>
-  );
-}
-
-// The team's original connection test: calls /api/data and shows whether Flask answered.
 function ServerStatus() {
   const [status, setStatus] = useState("Checking server…");
 
@@ -188,5 +187,5 @@ function ServerStatus() {
       .catch(() => setStatus("Server: not reachable - is Flask running on port 5001?"));
   }, []);
 
-  return <p className="muted small">{status}</p>;
+  return <p className="muted small" style={{ marginTop: "16px", textAlign: "center" }}>{status}</p>;
 }

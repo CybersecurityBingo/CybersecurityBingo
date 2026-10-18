@@ -26,6 +26,8 @@ import threading
 import time
 from datetime import datetime
 from bingocard import squares
+import firebase_admin
+from firebase_admin import auth as firebase_auth, credentials
 
 from flask import Flask, abort, jsonify, request, send_from_directory
 
@@ -101,6 +103,7 @@ def called_terms():
     return {c["term"] for c in game["called"]}
 
 
+# TODO set random 
 def make_card():
     terms = random.sample(list(BANK_BY_TERM), 24)
     terms.insert(FREE_INDEX, "FREE")
@@ -175,15 +178,6 @@ def data():
         date=datetime.now().isoformat(timespec="seconds"),
     )
 
-<<<<<<< HEAD
-@app.route("/api/squares")
-def get_squares():
-    return jsonify(squares)
-
-
-if __name__ == "__main__":
-    app.run(debug=True, port=5001)
-=======
 
 @app.post("/api/join")
 def join():
@@ -351,4 +345,3 @@ if __name__ == "__main__":
     if ADMIN_PASSWORD == "changeme":
         print("Warning: using default admin password 'changeme'. Set admin password.")
     app.run(host="0.0.0.0", port=PORT, debug=True)
->>>>>>> 18a070402977af54fea64b249859a5a6895d338f
