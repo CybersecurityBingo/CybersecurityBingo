@@ -142,6 +142,16 @@ def require_admin():
     if token not in admin_tokens:
         abort(401, description="Admin login required.")
 
+#Call this method on every request where the user should be validated
+def try_firebase_auth(token):
+    try:
+        firebase_auth.verify_id_token(token)
+        return True
+    except Exception as e:
+        print(f"Firebase auth failed: {e}")
+        abort(401, description="Invalid Firebase token.")
+        return False
+
 
 def public_called():
     """What players see: the questions only, never the answers."""
