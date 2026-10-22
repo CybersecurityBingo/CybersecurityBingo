@@ -1,66 +1,60 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { api, errorMessage, errorStatus } from "../api";
+import { useState } from "react";
+import { api, errorMessage } from "../api";
 import usePolling from "../usePolling";
 import { useAuth } from "../AuthContext";
 import AccountBar from "../components/AccountBar";
+import AuthForm from "../components/AuthForm";
 import BingoCard from "../components/BingoCard";
 import QuestionFeed from "../components/QuestionFeed";
 import type { BingoClaim, PlayerState } from "../types";
 
-const STORAGE_KEY = "bingo.playerId";
-
-const store = {
-  get: (): string | null => {
-    try { return localStorage.getItem(STORAGE_KEY); } catch { return null; }
-  },
-  set: (v: string) => {
-    try { localStorage.setItem(STORAGE_KEY, v); } catch { /* private mode */ }
-  },
-  clear: () => {
-    try { localStorage.removeItem(STORAGE_KEY); } catch { /* private mode */ }
-  },
-};
-
 export default function PlayerView() {
-  const [playerId, setPlayerId] = useState<string | null>(store.get);
-  const [state, setState] = useState<PlayerState | null>(null);
-  const [connError, setConnError] = useState("");
-  const [claim, setClaim] = useState<BingoClaim | null>(null);
+  const { user, loading } = useAuth();
 
-  usePolling(
-    async () => {
-      try {
-        setState(await api<PlayerState>(`/player/${playerId}`));
-        setConnError("");
-      } catch (e) {
-        if (errorStatus(e) === 404) {
-          // Game was reset or the ID is stale - send them back to the join screen.
-          store.clear();
-          setPlayerId(null);
-          setState(null);
-          setClaim(null);
-        } else {
-          setConnError("Can't reach the server - retrying…");
-        }
-      }
-    },
-    2000,
-    Boolean(playerId)
-  );
+  if (loading) {
+    return <main className="page center"><p className="muted">Checking sign-in…</p></main>;
+  }
 
-  if (!playerId) {
+  if (!user) {
     return (
-      <JoinForm
-        onJoined={(id) => {
-          store.set(id);
-          setPlayerId(id);
-        }}
-      />
+      <main className="page center">
+        <AuthForm />
+      </main>
     );
   }
 
+  // Keyed by account: switching users starts fresh, so one person's card never shows for the next.
+  return <PlayerGame key={user.uid} />;
+}
+
+function PlayerGame() {
+  const [state, setState] = useState<PlayerState>();
+  const [connError, setConnError] = useState("");
+  const [claim, setClaim] = useState<BingoClaim | null>(null);
+
+  async function refresh() {
+    try {
+      const next = await api<PlayerState>("/player");
+      // A new card ID means the host reset the game, so the old claim no longer applies.
+      if (next.card_id !== state?.card_id) setClaim(null);
+      setState(next);
+      setConnError("");
+    } catch (e) {
+      setConnError(errorMessage(e));
+    }
+  }
+
+  usePolling(refresh, 2000);
+
   if (!state) {
-    return <main className="page center"><p className="muted">{connError || "Loading your card…"}</p></main>;
+    return (
+      <main className="page center">
+        <div className="panel narrow">
+          <p className={connError ? "banner warn" : "muted"}>{connError || "Loading your card…"}</p>
+          <AccountBar />
+        </div>
+      </main>
+    );
   }
 
   async function toggle(index: number) {
@@ -73,7 +67,7 @@ export default function PlayerView() {
       return { ...s, marks: [...marks] };
     });
     try {
-      const { marks } = await api<{ marks: number[] }>(`/player/${playerId}/mark`, { method: "POST", body: { index } });
+      const { marks } = await api<{ marks: number[] }>("/player/mark", { method: "POST", body: { index } });
       setState((s) => (s ? { ...s, marks } : s));
     } catch (e) {
       setConnError(errorMessage(e));
@@ -82,7 +76,7 @@ export default function PlayerView() {
 
   async function callBingo() {
     try {
-      setClaim(await api<BingoClaim>(`/player/${playerId}/bingo`, { method: "POST" }));
+      setClaim(await api<BingoClaim>("/player/bingo", { method: "POST" }));
     } catch (e) {
       setClaim({ valid: false, message: errorMessage(e) });
     }
@@ -115,12 +109,12 @@ export default function PlayerView() {
             disabled={state.won}
           />
           {state.won ? (
-            <p className="banner good">You have BINGO! Show this code to the host: <code>{state.checksum.slice(0, 12)}</code></p>
+            <p className="banner good">You have BINGO! Show this code to the host: <code>{state.card_id}</code></p>
           ) : (
             <button className="primary big" onClick={callBingo}>BINGO!</button>
           )}
           {claim && !claim.valid && <p className="banner warn">{claim.message}</p>}
-          <p className="muted small">Card ID: <code>{state.checksum.slice(0, 12)}</code></p>
+          <p className="muted small">Card ID: <code>{state.card_id}</code></p>
         </section>
 
         <section className="panel" aria-labelledby="q-h">
@@ -132,61 +126,4 @@ export default function PlayerView() {
       </div>
     </main>
   );
-}
-
-function JoinForm({ onJoined }: { onJoined: (id: string) => void }) {
-  const { user } = useAuth();
-  const [name, setName] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  // Signed in with a Firebase account? Suggest a name from it.
-  useEffect(() => {
-    if (user && !name) setName((user.displayName || user.email?.split("@")[0] || "").slice(0, 30));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const { player_id } = await api<{ player_id: string }>("/join", { method: "POST", body: { name } });
-      onJoined(player_id);
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <main className="page center">
-      <form className="panel narrow" onSubmit={submit}>
-        <h1>White Hat Bingo</h1>
-        <p className="muted">Enter your name to get a card.</p>
-        <label htmlFor="name">Name</label>
-        <input id="name" value={name} maxLength={30} autoFocus onChange={(e) => setName(e.target.value)} />
-        {error && <p className="banner warn">{error}</p>}
-        <button className="primary" disabled={busy || !name.trim()}>
-          {busy ? "Joining…" : "Get my card"}
-        </button>
-        <AccountBar />
-        <ServerStatus />
-      </form>
-    </main>
-  );
-}
-
-// The team's original connection test: calls /api/data and shows whether Flask answered.
-function ServerStatus() {
-  const [status, setStatus] = useState("Checking server…");
-
-  useEffect(() => {
-    api<{ msg: string; date: string }>("/data")
-      .then((d) => setStatus(`Server: ${d.msg} (${d.date})`))
-      .catch(() => setStatus("Server: not reachable - is Flask running on port 5001?"));
-  }, []);
-
-  return <p className="muted small">{status}</p>;
 }

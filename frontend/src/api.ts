@@ -1,3 +1,5 @@
+import { auth } from "./firebase";
+
 // Small fetch wrapper: JSON in, JSON out, throws an ApiError with the server's message.
 // Paths are relative ("/api/..."), so in dev they go through the Vite proxy to Flask
 // and in production Flask serves the built app itself. No VITE_API_URL needed.
@@ -19,6 +21,10 @@ interface ApiOptions {
 export async function api<T>(path: string, { method = "GET", body, token }: ApiOptions = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["X-Admin-Token"] = token;
+
+  // Firebase refreshes the ID token itself when it is close to expiring.
+  const idToken = await auth.currentUser?.getIdToken();
+  if (idToken) headers["Authorization"] = `Bearer ${idToken}`;
 
   const res = await fetch(`/api${path}`, {
     method,

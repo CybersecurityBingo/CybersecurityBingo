@@ -1,58 +1,86 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, errorMessage, errorStatus } from "../api";
 import usePolling from "../usePolling";
+import BingoCard from "../components/BingoCard";
 import QuestionFeed from "../components/QuestionFeed";
-import type { AdminState, BankQuestion, CalledQuestion } from "../types";
+import type { AdminPlayer, AdminState, BankQuestion, CalledQuestion } from "../types";
+
+const boardStatus = (p: AdminPlayer) => (p.won ? "🏆 Winner" : p.line ? "Has BINGO, not claimed" : "Playing");
+
+// Read-only card plus what the host needs to rebuild it (see backend/README.md).
+function PlayerBoard({ player, calledTerms }: { player: AdminPlayer; calledTerms: Set<string> }) {
+  const [showAnswers, setShowAnswers] = useState(false);
+  const answers = player.card.flatMap((t, i) => (t === "FREE" || calledTerms.has(t) ? [i] : []));
+
+  return (
+    <>
+      <p className="muted small">
+        {boardStatus(player)} · Player <code>{player.id}</code> · Card <code>{player.card_id}</code>
+      </p>
+      <div className="row toggle">
+        <button className="small" aria-pressed={!showAnswers} onClick={() => setShowAnswers(false)}>
+          Player's marks
+        </button>
+        <button className="small" aria-pressed={showAnswers} onClick={() => setShowAnswers(true)}>
+          Called answers
+        </button>
+      </div>
+      <BingoCard card={player.card} marks={showAnswers ? answers : player.marks} winLine={player.line ?? []} disabled />
+    </>
+  );
+}
 
 const TOKEN_KEY = "bingo.adminToken";
-const getToken = (): string | null => {
+const loadToken = (): string | null => {
   try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
-};
-const setToken = (t: string | null) => {
-  try {
-    if (t) sessionStorage.setItem(TOKEN_KEY, t);
-    else sessionStorage.removeItem(TOKEN_KEY);
-  } catch { /* ignore */ }
 };
 
 export default function AdminView() {
-  const [token, setTok] = useState<string | null>(getToken);
+  const [token, setToken] = useState<string | null>(loadToken);
   const [state, setState] = useState<AdminState | null>(null);
   const [error, setError] = useState("");
+  const [viewingId, setViewingId] = useState<string | null>(null);
 
-  const logout = () => {
-    setToken(null);
-    setTok(null);
-    setState(null);
-  };
+  function saveToken(t: string | null) {
+    try {
+      if (t) sessionStorage.setItem(TOKEN_KEY, t);
+      else sessionStorage.removeItem(TOKEN_KEY);
+    } catch { /* private mode: token just won't survive a reload */ }
+    setToken(t);
+    if (!t) setState(null);
+  }
 
-  usePolling(
-    async () => {
-      try {
-        setState(await api<AdminState>("/admin/state", { token }));
-        setError("");
-      } catch (e) {
-        if (errorStatus(e) === 401) logout();
-        else setError("Can't reach the server - retrying…");
-      }
-    },
-    2000,
-    Boolean(token)
-  );
+  async function refresh() {
+    try {
+      setState(await api<AdminState>("/admin/state", { token }));
+      setError("");
+    } catch (e) {
+      if (errorStatus(e) === 401) saveToken(null);
+      else setError(errorMessage(e));
+    }
+  }
+
+  usePolling(refresh, 2000, Boolean(token));
 
   if (!token) {
-    return <AdminLogin onLogin={(t) => { setToken(t); setTok(t); }} />;
+    return <AdminLogin onLogin={saveToken} />;
   }
   if (!state) {
     return <main className="page center"><p className="muted">{error || "Loading…"}</p></main>;
   }
 
-  const refresh = async () => setState(await api<AdminState>("/admin/state", { token }));
+  const viewing = state.players.find((p) => p.id === viewingId);
+  const winning = state.players.filter((p) => p.line);
+  const calledTerms = new Set(state.called.map((c) => c.term ?? ""));
 
   async function reset() {
     if (!window.confirm("Reset the game? All players and questions will be cleared.")) return;
-    await api("/admin/reset", { method: "POST", token });
-    refresh();
+    try {
+      await api("/admin/reset", { method: "POST", token });
+      await refresh();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
   }
 
   return (
@@ -66,7 +94,7 @@ export default function AdminView() {
         </div>
         <div className="row">
           <button className="danger" onClick={reset}>Reset game</button>
-          <button onClick={logout}>Log out</button>
+          <button onClick={() => saveToken(null)}>Log out</button>
         </div>
       </header>
 
@@ -106,19 +134,44 @@ export default function AdminView() {
           ) : (
             <table>
               <thead>
-                <tr><th>Name</th><th>Marked</th><th>Card ID</th><th>Status</th></tr>
+                <tr><th>Name</th><th>Marked</th><th>Card ID</th><th>Status</th><th></th></tr>
               </thead>
               <tbody>
                 {state.players.map((p) => (
-                  <tr key={p.checksum}>
+                  <tr key={p.id}>
                     <td>{p.name}</td>
-                    <td>{p.marks}</td>
-                    <td><code>{p.checksum}</code></td>
-                    <td>{p.won ? "🏆 Winner" : "Playing"}</td>
+                    <td>{p.marks.length - 1}</td>
+                    <td><code>{p.card_id}</code></td>
+                    <td>{boardStatus(p)}</td>
+                    <td><button className="small" onClick={() => setViewingId(p.id)}>View</button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          )}
+        </section>
+
+        {viewing && (
+          <section className="panel" aria-labelledby="board-h">
+            <div className="topbar">
+              <h2 id="board-h">{viewing.name}'s board</h2>
+              <button className="small" onClick={() => setViewingId(null)}>Close</button>
+            </div>
+            <PlayerBoard player={viewing} calledTerms={calledTerms} />
+          </section>
+        )}
+
+        <section className="panel" aria-labelledby="winning-h">
+          <h2 id="winning-h">Boards with BINGO ({winning.length})</h2>
+          {winning.length === 0 ? (
+            <p className="muted">No one has a complete line yet.</p>
+          ) : (
+            winning.map((p) => (
+              <div key={p.id}>
+                <h3>{p.name}</h3>
+                <PlayerBoard player={p} calledTerms={calledTerms} />
+              </div>
+            ))
           )}
         </section>
       </div>
@@ -155,7 +208,7 @@ function SendQuestion({ bank, token, onSent }: SendQuestionProps) {
     setQuestion(bank.find((q) => q.term === t)?.question || "");
   }
 
-  async function send(body: { term: string; question: string } | { random: true }) {
+  async function send(body: { term: string; question?: string }) {
     setMsg("");
     try {
       const sent = await api<CalledQuestion>("/admin/call", { method: "POST", token, body });
@@ -184,7 +237,9 @@ function SendQuestion({ bank, token, onSent }: SendQuestionProps) {
         <button className="primary" disabled={!term || !question.trim()} onClick={() => send({ term, question })}>
           Send question
         </button>
-        <button onClick={() => send({ random: true })}>Send a random one</button>
+        <button onClick={() => send({ term: remaining[Math.floor(Math.random() * remaining.length)].term })}>
+          Send a random one
+        </button>
       </div>
       <p className="muted small">{remaining.length} of {bank.length} questions left.</p>
       {msg && <p className="banner">{msg}</p>}

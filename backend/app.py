@@ -1,55 +1,38 @@
-"""Flask backend for the bingo game.
-
-Current Design
-  * All game state lives in memory so rrestarting the server resets the game.
-  * TODO: add a database so the game can survive a server restart (?)
-
-  * Clients poll every couple of seconds instead of using websockets.
-  * Admin logs in with a single shared password from an env variable.
-
-Run (dev):   python app.py                  -> http://localhost:5001
-Run (prod):  gunicorn -w 1 --threads 8 -b 0.0.0.0:5001 app:app
-             (keep -w 1: state is in memory, so it can't be split across workers)
-
-py -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python app.py
-"""
-
 import hashlib
-import hmac
 import os
-import random
 import secrets
 import threading
 import time
-from datetime import datetime
-from bingocard import squares
 
+import cachecontrol
+import requests
 from flask import Flask, abort, jsonify, request, send_from_directory
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
+from werkzeug.exceptions import HTTPException
 
 from questions import QUESTION_BANK
+
+# Load backend .env file if present
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.isfile(env_path):
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
 
 # Config
 
 ADMIN_PASSWORD = os.environ.get("BINGO_ADMIN_PASSWORD", "changeme")
-SERVER_SECRET = os.environ.get("BINGO_SECRET", secrets.token_hex(32)).encode()
+FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID", "bingo-7280b")
+EMAIL_DOMAIN = "@case.edu"
 MAX_PLAYERS = int(os.environ.get("BINGO_MAX_PLAYERS", "300"))
 MAX_NAME_LEN = 30
 PORT = int(os.environ.get("PORT", "5001"))  # 5000 clashes with AirPlay on macOS
-
-# Sites allowed to call this API directly from a browser (CORS). Not needed when
-# going through the Vite proxy or the built app, but kept for any frontend that
-# calls http://localhost:5001 directly. Comma-separated; override with an env var.
-CORS_ORIGINS = {
-    o.strip()
-    for o in os.environ.get(
-        "BINGO_CORS_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000",
-    ).split(",")
-    if o.strip()
-}
 
 FRONTEND_DIST = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
@@ -68,25 +51,16 @@ assert len(BANK_BY_TERM) >= 24, "Question bank needs at least 24 unique terms"
 app = Flask(__name__, static_folder=None)
 lock = threading.Lock()
 
-
-@app.after_request
-def add_cors_headers(response):
-    # From the team's starter app.py, narrowed from "*" to an allowlist.
-    origin = request.headers.get("Origin")
-    if origin in CORS_ORIGINS:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Vary"] = "Origin"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Admin-Token"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    return response
+# google-auth fetches Google's signing keys on every verify; CacheControl reuses them until they expire.
+_auth_request = google_requests.Request(session=cachecontrol.CacheControl(requests.Session()))
 
 
 # Game state
 
 def fresh_game():
     return {
-        "id": secrets.token_hex(4),
-        "players": {},   # player_id -> {name, card, marks, checksum, joined_at, won}
+        "id": secrets.token_hex(8),  # 64 random bits: unique per game, and the seed for every card in it
+        "players": {},   # player_id -> {name, card, card_id, marks, joined_at, won}
         "called": [],    # [{n, term, question, at}]
         "claims": [],    # [{player, name, valid, line, at}]
         "winners": [],   # [name]
@@ -101,17 +75,24 @@ def called_terms():
     return {c["term"] for c in game["called"]}
 
 
-def make_card():
-    terms = random.sample(list(BANK_BY_TERM), 24)
+def make_card(game_id, player_id):
+    """Deal a card that can be rebuilt from (game id, player id) alone.
+
+    Each term is ranked by sha256("<game_id>:<player_id>:<term>") and the 24 lowest
+    fill the card in order. Order in QUESTION_BANK doesn't matter, but adding or
+    removing terms changes every card.
+    """
+    def rank(term):
+        return hashlib.sha256(f"{game_id}:{player_id}:{term}".encode()).digest()
+
+    terms = sorted(BANK_BY_TERM, key=rank)[:24]
     terms.insert(FREE_INDEX, "FREE")
     return terms
 
 
-# TODO: Yet to be determined if this is good enough
-def card_checksum(player_id, name, card):
-    """HMAC-SHA256 over the card so a card can't be forged or edited later."""
-    payload = "|".join([game["id"], player_id, name, *card]).encode()
-    return hmac.new(SERVER_SECRET, payload, hashlib.sha256).hexdigest()
+def card_id(game_id, player_id):
+    """Short code the host matches against a winner's screen; rebuildable like the card."""
+    return hashlib.sha256(f"{game_id}:{player_id}".encode()).hexdigest()[:12]
 
 
 def winning_line(player):
@@ -127,6 +108,23 @@ def winning_line(player):
     return None
 
 
+def current_user():
+    """Verify the caller's Firebase ID token (Authorization: Bearer ...) and return its claims."""
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not token:
+        abort(401, description="Please sign in.")
+    try:
+        claims = id_token.verify_firebase_token(token, _auth_request, audience=FIREBASE_PROJECT_ID)
+    except Exception as e:
+        print(f"Firebase token verification failed: {e}")
+        abort(401, description="Your sign-in expired or is invalid - please sign in again.")
+    # Google only: it proves the user owns the address. Password sign-ups could type any case.edu email.
+    is_google = claims.get("firebase", {}).get("sign_in_provider") == "google.com"
+    if not is_google or not claims.get("email", "").lower().endswith(EMAIL_DOMAIN):
+        abort(403, description=f"Please sign in with your {EMAIL_DOMAIN} Google account.")
+    return claims
+
+
 def player_or_404(player_id):
     player = game["players"].get(player_id)
     if player is None:
@@ -136,8 +134,9 @@ def player_or_404(player_id):
 
 def require_admin():
     token = request.headers.get("X-Admin-Token", "")
-    if token not in admin_tokens:
-        abort(401, description="Admin login required.")
+    with lock:
+        if token not in admin_tokens:
+            abort(401, description="Admin login required.")
 
 
 def public_called():
@@ -145,11 +144,7 @@ def public_called():
     return [{"n": c["n"], "question": c["question"], "at": c["at"]} for c in game["called"]]
 
 
-@app.errorhandler(400)
-@app.errorhandler(401)
-@app.errorhandler(404)
-@app.errorhandler(409)
-@app.errorhandler(429)
+@app.errorhandler(HTTPException)
 def json_error(err):
     return jsonify(error=err.description), err.code
 
@@ -162,66 +157,38 @@ def server_error(err):
 
 # Player API
 
-@app.get("/api/health")
-def health():
-    return jsonify(ok=True)
-
-
-@app.get("/api/data")
-def data():
-    """Connection test from the team's starter app.py."""
-    return jsonify(
-        msg="hello world!",
-        date=datetime.now().isoformat(timespec="seconds"),
-    )
-
-@app.route("/api/squares")
-def get_squares():
-    return jsonify(squares)
-
-
-if __name__ == "__main__":
-    app.run(debug=True, port=5001)
-
-@app.post("/api/join")
-def join():
-    data = request.get_json(silent=True) or {}
-    name = str(data.get("name", "")).strip()[:MAX_NAME_LEN]
-    if not name:
-        abort(400, description="Please enter a name.")
+@app.get("/api/player")
+def player_state():
+    """The caller's card. Their first call in each game deals them in, named from their Google account."""
+    user = current_user()
+    player_id = user["sub"]
     with lock:
-        if len(game["players"]) >= MAX_PLAYERS:
-            abort(429, description="This game is full.")
-        player_id = secrets.token_urlsafe(16)
-        card = make_card()
-        game["players"][player_id] = {
-            "name": name,
-            "card": card,
-            "marks": {FREE_INDEX},
-            "checksum": card_checksum(player_id, name, card),
-            "joined_at": time.time(),
-            "won": False,
-        }
-    return jsonify(player_id=player_id), 201
-
-
-@app.get("/api/player/<player_id>")
-def player_state(player_id):
-    with lock:
-        p = player_or_404(player_id)
+        p = game["players"].get(player_id)
+        if p is None:
+            if len(game["players"]) >= MAX_PLAYERS:
+                abort(429, description="This game is full.")
+            p = game["players"][player_id] = {
+                "name": (user.get("name") or user["email"].split("@")[0])[:MAX_NAME_LEN],
+                "card": make_card(game["id"], player_id),
+                "card_id": card_id(game["id"], player_id),
+                "marks": {FREE_INDEX},
+                "joined_at": time.time(),
+                "won": False,
+            }
         return jsonify(
             name=p["name"],
             card=p["card"],
+            card_id=p["card_id"],
             marks=sorted(p["marks"]),
-            checksum=p["checksum"],
             won=p["won"],
             called=public_called(),
             winners=game["winners"],
         )
 
 
-@app.post("/api/player/<player_id>/mark")
-def toggle_mark(player_id):
+@app.post("/api/player/mark")
+def toggle_mark():
+    player_id = current_user()["sub"]
     data = request.get_json(silent=True) or {}
     index = data.get("index")
     if not isinstance(index, int) or not 0 <= index < 25 or index == FREE_INDEX:
@@ -233,17 +200,14 @@ def toggle_mark(player_id):
         return jsonify(marks=sorted(p["marks"]))
 
 
-@app.post("/api/player/<player_id>/bingo")
-def claim_bingo(player_id):
+@app.post("/api/player/bingo")
+def claim_bingo():
+    player_id = current_user()["sub"]
     with lock:
         p = player_or_404(player_id)
         if p["won"]:
             return jsonify(valid=True, message="You already have BINGO!")
-        # Re-verify the card hasn't been tampered with since it was issued.
-        intact = hmac.compare_digest(
-            p["checksum"], card_checksum(player_id, p["name"], p["card"])
-        )
-        line = winning_line(p) if intact else None
+        line = winning_line(p)
         game["claims"].append({
             "player": player_id,
             "name": p["name"],
@@ -254,7 +218,7 @@ def claim_bingo(player_id):
         if line:
             p["won"] = True
             game["winners"].append(p["name"])
-            return jsonify(valid=True, line=line, message="BINGO! Show your checksum to the host.")
+            return jsonify(valid=True, line=line, message="BINGO! Show your card ID to the host.")
         return jsonify(
             valid=False,
             message="Not quite - one of your marked squares hasn't been called yet.",
@@ -267,10 +231,11 @@ def claim_bingo(player_id):
 def admin_login():
     data = request.get_json(silent=True) or {}
     supplied = str(data.get("password", ""))
-    if not hmac.compare_digest(supplied, ADMIN_PASSWORD):
+    if not secrets.compare_digest(supplied, ADMIN_PASSWORD):
         abort(401, description="Wrong password.")
     token = secrets.token_urlsafe(24)
-    admin_tokens.add(token)
+    with lock:
+        admin_tokens.add(token)
     return jsonify(token=token)
 
 
@@ -285,12 +250,15 @@ def admin_state():
             called=game["called"],
             players=[
                 {
+                    "id": player_id,
                     "name": p["name"],
-                    "marks": len(p["marks"]) - 1,
+                    "card": p["card"],
+                    "card_id": p["card_id"],
+                    "marks": sorted(p["marks"]),
+                    "line": winning_line(p),  # a complete marked+called line, claimed or not
                     "won": p["won"],
-                    "checksum": p["checksum"][:12],
                 }
-                for p in sorted(game["players"].values(), key=lambda x: x["joined_at"])
+                for player_id, p in sorted(game["players"].items(), key=lambda kv: kv[1]["joined_at"])
             ],
             claims=[{k: v for k, v in c.items() if k != "player"} for c in reversed(game["claims"])],
             winners=game["winners"],
@@ -302,14 +270,11 @@ def admin_call():
     """Send a question to all players."""
     require_admin()
     data = request.get_json(silent=True) or {}
+    term = data.get("term")
+    if not isinstance(term, str) or term not in BANK_BY_TERM:
+        abort(400, description="Unknown term.")
     with lock:
-        remaining = [t for t in BANK_BY_TERM if t not in called_terms()]
-        if not remaining:
-            abort(409, description="Every question has already been sent.")
-        term = random.choice(remaining) if data.get("random") else data.get("term")
-        if term not in BANK_BY_TERM:
-            abort(400, description="Unknown term.")
-        if term not in remaining:
+        if term in called_terms():
             abort(409, description="Question previously sent.")
         question = str(data.get("question") or BANK_BY_TERM[term]["question"]).strip()[:300]
         entry = {"n": len(game["called"]) + 1, "term": term, "question": question, "at": time.time()}
@@ -348,4 +313,5 @@ def frontend(path):
 if __name__ == "__main__":
     if ADMIN_PASSWORD == "changeme":
         print("Warning: using default admin password 'changeme'. Set admin password.")
-    app.run(host="0.0.0.0", port=PORT, debug=True)
+    # The debug console runs Python, so keep it off unless asked for.
+    app.run(host="0.0.0.0", port=PORT, debug=os.environ.get("FLASK_DEBUG") == "1")
