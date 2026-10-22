@@ -10,8 +10,8 @@ export interface CalledQuestion {
 export interface PlayerState {
   name: string;
   card: string[]; // 25 terms, index 12 is "FREE"
+  card_id: string;
   marks: number[];
-  checksum: string;
   won: boolean;
   called: CalledQuestion[];
   winners: string[];
@@ -33,7 +33,7 @@ export interface AdminState {
   game_id: string;
   bank: BankQuestion[];
   called: CalledQuestion[];
-  players: { name: string; marks: number; won: boolean; checksum: string }[];
+  players: { name: string; marks: number; won: boolean; card_id: string }[];
   claims: { name: string; valid: boolean; line: number[] | null; at: number }[];
   winners: string[];
 }
