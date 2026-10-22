@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { api, errorMessage, errorStatus } from "../api";
+import { useState } from "react";
+import { api, errorMessage } from "../api";
 import usePolling from "../usePolling";
 import { useAuth } from "../AuthContext";
 import AccountBar from "../components/AccountBar";
@@ -28,29 +28,25 @@ export default function PlayerView() {
 }
 
 function PlayerGame() {
-  // undefined = not loaded yet, null = no card in this game yet
-  const [state, setState] = useState<PlayerState | null | undefined>(undefined);
+  const [state, setState] = useState<PlayerState>();
   const [connError, setConnError] = useState("");
   const [claim, setClaim] = useState<BingoClaim | null>(null);
 
   async function refresh() {
     try {
-      setState(await api<PlayerState>("/player"));
+      const next = await api<PlayerState>("/player");
+      // A new card ID means the host reset the game, so the old claim no longer applies.
+      if (next.card_id !== state?.card_id) setClaim(null);
+      setState(next);
       setConnError("");
     } catch (e) {
-      if (errorStatus(e) === 404) {
-        // Not joined yet, or the host reset the game.
-        setState(null);
-        setClaim(null);
-      } else {
-        setConnError(errorMessage(e));
-      }
+      setConnError(errorMessage(e));
     }
   }
 
   usePolling(refresh, 2000);
 
-  if (state === undefined) {
+  if (!state) {
     return (
       <main className="page center">
         <div className="panel narrow">
@@ -59,10 +55,6 @@ function PlayerGame() {
         </div>
       </main>
     );
-  }
-
-  if (state === null) {
-    return <JoinForm onJoined={refresh} />;
   }
 
   async function toggle(index: number) {
@@ -132,44 +124,6 @@ function PlayerGame() {
           </div>
         </section>
       </div>
-    </main>
-  );
-}
-
-function JoinForm({ onJoined }: { onJoined: () => Promise<void> }) {
-  const { user } = useAuth();
-  const defaultName = (user?.displayName || user?.email?.split("@")[0] || "").slice(0, 30);
-  const [name, setName] = useState(defaultName);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      await api("/join", { method: "POST", body: { name } });
-      await onJoined();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <main className="page center">
-      <form className="panel narrow" onSubmit={submit}>
-        <h1>White Hat Bingo</h1>
-        <p className="muted">Enter your name to get a card.</p>
-        <label htmlFor="name">Name</label>
-        <input id="name" value={name} maxLength={30} autoFocus onChange={(e) => setName(e.target.value)} />
-        {error && <p className="banner warn">{error}</p>}
-        <button className="primary" disabled={busy || !name.trim()}>
-          {busy ? "Joining…" : "Get my card"}
-        </button>
-        <AccountBar />
-      </form>
     </main>
   );
 }

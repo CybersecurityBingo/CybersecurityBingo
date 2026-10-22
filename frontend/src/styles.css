@@ -161,3 +161,5 @@ th { color: var(--muted); font-weight: 600; }
   margin: 8px 0 16px;
 }
 .panel .account-bar { margin: 16px 0 0; }
+.toggle { margin-top: 4px; }
+.toggle button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
