@@ -94,7 +94,6 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 button.danger { color: var(--danger); border-color: var(--danger); }
 button.big { width: 100%; margin-top: 14px; padding: 14px; font-size: 1.2rem; letter-spacing: 0.08em; }
-
 .banner { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--bg); }
 .banner.warn { background: var(--warn-bg); color: var(--warn); }
 .banner.good { background: var(--good-bg); color: var(--good); font-weight: 600; }
@@ -162,3 +161,5 @@ th { color: var(--muted); font-weight: 600; }
   margin: 8px 0 16px;
 }
 .panel .account-bar { margin: 16px 0 0; }
+.toggle { margin-top: 4px; }
+.toggle button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }

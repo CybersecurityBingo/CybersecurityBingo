@@ -1,22 +1,22 @@
+import { signOut } from "firebase/auth";
 import { useAuth } from "../AuthContext";
-import { JankLoginButton, JankSignupButton } from "../JankButtons";
+import { auth } from "../firebase";
 
-// Firebase sign-in status + the team's login/sign-up buttons.
 export default function AccountBar() {
-  const { user, loading, configured } = useAuth();
+  const { user, loading } = useAuth();
 
   let status = "Not signed in";
-  if (!configured) status = "Accounts not set up yet";
-  else if (loading) status = "Checking sign-in…";
-  else if (user) status = `Signed in as ${user.email}`;
+  if (loading) status = "Checking sign-in…";
+  else if (user) status = `Signed in as ${user.displayName || user.email}`;
 
   return (
     <div className="account-bar">
       <span className="muted small">{status}</span>
-      <div className="row">
-        <JankLoginButton />
-        <JankSignupButton />
-      </div>
+      {user && (
+        <button type="button" onClick={() => signOut(auth)} className="small">
+          Log out
+        </button>
+      )}
     </div>
   );
 }
