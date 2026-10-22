@@ -1,5 +1,5 @@
+import hashlib
 import os
-import random
 import secrets
 import threading
 import time
@@ -34,18 +34,6 @@ MAX_PLAYERS = int(os.environ.get("BINGO_MAX_PLAYERS", "300"))
 MAX_NAME_LEN = 30
 PORT = int(os.environ.get("PORT", "5001"))  # 5000 clashes with AirPlay on macOS
 
-# Sites allowed to call this API directly from a browser (CORS). Not needed when
-# going through the Vite proxy or the built app, but kept for any frontend that
-# calls http://localhost:5001 directly. Comma-separated; override with an env var.
-CORS_ORIGINS = {
-    o.strip()
-    for o in os.environ.get(
-        "BINGO_CORS_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000",
-    ).split(",")
-    if o.strip()
-}
-
 FRONTEND_DIST = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 )
@@ -67,23 +55,11 @@ lock = threading.Lock()
 _auth_request = google_requests.Request(session=cachecontrol.CacheControl(requests.Session()))
 
 
-@app.after_request
-def add_cors_headers(response):
-    # Also runs on Flask's automatic OPTIONS (preflight) responses. Narrowed from "*" to an allowlist.
-    origin = request.headers.get("Origin")
-    if origin in CORS_ORIGINS:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Vary"] = "Origin"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Admin-Token"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    return response
-
-
 # Game state
 
 def fresh_game():
     return {
-        "id": secrets.token_hex(4),
+        "id": secrets.token_hex(8),  # 64 random bits: unique per game, and the seed for every card in it
         "players": {},   # player_id -> {name, card, card_id, marks, joined_at, won}
         "called": [],    # [{n, term, question, at}]
         "claims": [],    # [{player, name, valid, line, at}]
@@ -99,10 +75,24 @@ def called_terms():
     return {c["term"] for c in game["called"]}
 
 
-def make_card():
-    terms = random.sample(list(BANK_BY_TERM), 24)
+def make_card(game_id, player_id):
+    """Deal a card that can be rebuilt from (game id, player id) alone.
+
+    Each term is ranked by sha256("<game_id>:<player_id>:<term>") and the 24 lowest
+    fill the card in order. Order in QUESTION_BANK doesn't matter, but adding or
+    removing terms changes every card.
+    """
+    def rank(term):
+        return hashlib.sha256(f"{game_id}:{player_id}:{term}".encode()).digest()
+
+    terms = sorted(BANK_BY_TERM, key=rank)[:24]
     terms.insert(FREE_INDEX, "FREE")
     return terms
+
+
+def card_id(game_id, player_id):
+    """Short code the host matches against a winner's screen; rebuildable like the card."""
+    return hashlib.sha256(f"{game_id}:{player_id}".encode()).hexdigest()[:12]
 
 
 def winning_line(player):
@@ -118,8 +108,8 @@ def winning_line(player):
     return None
 
 
-def current_user_id():
-    """Verify the caller's Firebase ID token (Authorization: Bearer ...) and return their user id."""
+def current_user():
+    """Verify the caller's Firebase ID token (Authorization: Bearer ...) and return its claims."""
     token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     if not token:
         abort(401, description="Please sign in.")
@@ -132,7 +122,7 @@ def current_user_id():
     is_google = claims.get("firebase", {}).get("sign_in_provider") == "google.com"
     if not is_google or not claims.get("email", "").lower().endswith(EMAIL_DOMAIN):
         abort(403, description=f"Please sign in with your {EMAIL_DOMAIN} Google account.")
-    return claims["sub"]
+    return claims
 
 
 def player_or_404(player_id):
@@ -167,40 +157,24 @@ def server_error(err):
 
 # Player API
 
-@app.get("/api/health")
-def health():
-    return jsonify(ok=True)
-
-
-@app.post("/api/join")
-def join():
-    data = request.get_json(silent=True) or {}
-    name = str(data.get("name", "")).strip()[:MAX_NAME_LEN]
-    if not name:
-        abort(400, description="Please enter a name.")
-    player_id = current_user_id()
-    with lock:
-        if player_id in game["players"]:
-            game["players"][player_id]["name"] = name
-            return jsonify(player_id=player_id), 200
-        if len(game["players"]) >= MAX_PLAYERS:
-            abort(429, description="This game is full.")
-        game["players"][player_id] = {
-            "name": name,
-            "card": make_card(),
-            "card_id": secrets.token_hex(6),  # what the host checks against a winner's screen
-            "marks": {FREE_INDEX},
-            "joined_at": time.time(),
-            "won": False,
-        }
-    return jsonify(player_id=player_id), 201
-
-
 @app.get("/api/player")
 def player_state():
-    player_id = current_user_id()
+    """The caller's card. Their first call in each game deals them in, named from their Google account."""
+    user = current_user()
+    player_id = user["sub"]
     with lock:
-        p = player_or_404(player_id)
+        p = game["players"].get(player_id)
+        if p is None:
+            if len(game["players"]) >= MAX_PLAYERS:
+                abort(429, description="This game is full.")
+            p = game["players"][player_id] = {
+                "name": (user.get("name") or user["email"].split("@")[0])[:MAX_NAME_LEN],
+                "card": make_card(game["id"], player_id),
+                "card_id": card_id(game["id"], player_id),
+                "marks": {FREE_INDEX},
+                "joined_at": time.time(),
+                "won": False,
+            }
         return jsonify(
             name=p["name"],
             card=p["card"],
@@ -214,7 +188,7 @@ def player_state():
 
 @app.post("/api/player/mark")
 def toggle_mark():
-    player_id = current_user_id()
+    player_id = current_user()["sub"]
     data = request.get_json(silent=True) or {}
     index = data.get("index")
     if not isinstance(index, int) or not 0 <= index < 25 or index == FREE_INDEX:
@@ -228,7 +202,7 @@ def toggle_mark():
 
 @app.post("/api/player/bingo")
 def claim_bingo():
-    player_id = current_user_id()
+    player_id = current_user()["sub"]
     with lock:
         p = player_or_404(player_id)
         if p["won"]:
@@ -276,12 +250,15 @@ def admin_state():
             called=game["called"],
             players=[
                 {
+                    "id": player_id,
                     "name": p["name"],
-                    "marks": len(p["marks"]) - 1,
-                    "won": p["won"],
+                    "card": p["card"],
                     "card_id": p["card_id"],
+                    "marks": sorted(p["marks"]),
+                    "line": winning_line(p),  # a complete marked+called line, claimed or not
+                    "won": p["won"],
                 }
-                for p in sorted(game["players"].values(), key=lambda x: x["joined_at"])
+                for player_id, p in sorted(game["players"].items(), key=lambda kv: kv[1]["joined_at"])
             ],
             claims=[{k: v for k, v in c.items() if k != "player"} for c in reversed(game["claims"])],
             winners=game["winners"],
@@ -293,14 +270,11 @@ def admin_call():
     """Send a question to all players."""
     require_admin()
     data = request.get_json(silent=True) or {}
+    term = data.get("term")
+    if not isinstance(term, str) or term not in BANK_BY_TERM:
+        abort(400, description="Unknown term.")
     with lock:
-        remaining = [t for t in BANK_BY_TERM if t not in called_terms()]
-        if not remaining:
-            abort(409, description="Every question has already been sent.")
-        term = random.choice(remaining) if data.get("random") else data.get("term")
-        if term not in BANK_BY_TERM:
-            abort(400, description="Unknown term.")
-        if term not in remaining:
+        if term in called_terms():
             abort(409, description="Question previously sent.")
         question = str(data.get("question") or BANK_BY_TERM[term]["question"]).strip()[:300]
         entry = {"n": len(game["called"]) + 1, "term": term, "question": question, "at": time.time()}

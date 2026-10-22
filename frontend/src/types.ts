@@ -29,11 +29,21 @@ export interface BankQuestion {
   called: boolean;
 }
 
+export interface AdminPlayer {
+  id: string; // Firebase user id: with the game id, enough to rebuild the card
+  name: string;
+  card: string[];
+  card_id: string;
+  marks: number[];
+  line: number[] | null; // a complete marked+called line, claimed or not
+  won: boolean;
+}
+
 export interface AdminState {
   game_id: string;
   bank: BankQuestion[];
   called: CalledQuestion[];
-  players: { name: string; marks: number; won: boolean; card_id: string }[];
+  players: AdminPlayer[];
   claims: { name: string; valid: boolean; line: number[] | null; at: number }[];
   winners: string[];
 }
