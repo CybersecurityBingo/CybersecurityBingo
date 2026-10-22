@@ -35,7 +35,6 @@ export default function AuthForm() {
       <button type="button" className="primary big" onClick={signIn} disabled={loading}>
         {loading ? "Signing in…" : "Sign in with Google"}
         </button>
-      </p>
     </div>
   );
 }

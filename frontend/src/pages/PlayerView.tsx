@@ -164,7 +164,7 @@ export default function PlayerView() {
             <button className="primary big" onClick={callBingo}>BINGO!</button>
           )}
           {claim && !claim.valid && <p className="banner warn">{claim.message}</p>}
-          <p className="muted small">Card ID: <code>{state.checksum.slice(0, 12)}</code></p>
+          {/*<p className="muted small">Card ID: <code>{state.checksum.slice(0, 12)}</code></p>*/}
         </section>
 
         <section className="panel" aria-labelledby="q-h">
