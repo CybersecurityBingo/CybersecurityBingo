@@ -175,7 +175,6 @@ def data():
         date=datetime.now().isoformat(timespec="seconds"),
     )
 
-<<<<<<< HEAD
 @app.route("/api/squares")
 def get_squares():
     return jsonify(squares)
@@ -183,7 +182,6 @@ def get_squares():
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)
-=======
 
 @app.post("/api/join")
 def join():
@@ -351,4 +349,3 @@ if __name__ == "__main__":
     if ADMIN_PASSWORD == "changeme":
         print("Warning: using default admin password 'changeme'. Set admin password.")
     app.run(host="0.0.0.0", port=PORT, debug=True)
->>>>>>> 18a070402977af54fea64b249859a5a6895d338f
