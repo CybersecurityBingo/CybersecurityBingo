@@ -1,0 +1,82 @@
+/*
+Theme overrides: sharp edges + light/dark modes.
+Imported in main.tsx after styles.css
+Light is the default
+Overrides the `:root` inside styles.css's, so the page stays
+light even when the computer is set to dark by default
+ */
+
+/* Sharp edges (panels, buttons, inputs, cells, pills, banners) */
+*,
+*::before,
+*::after {
+  border-radius: 0 !important;
+}
+
+/* 2. Light mode */
+:root:not([data-theme="dark"]) {
+  --bg: #ffffff;
+  --panel: #ffffff;
+  --text: #000000;
+  --muted: #555555;
+  --border: #000000;
+  --accent: #000000;
+  --accent-text: #ffffff;
+  --mark: #000000;
+  --win: #595959;
+  --warn-bg: #f0f0f0;
+  --warn: #000000;
+  --good-bg: #f0f0f0;
+  --good: #000000;
+  --danger: #000000;
+  color-scheme: light;
+}
+
+/* 3. Dark mode */
+:root[data-theme="dark"] {
+  --bg: #000000;
+  --panel: #000000;
+  --text: #ffffff;
+  --muted: #aaaaaa;
+  --border: #ffffff;
+  --accent: #ffffff;
+  --accent-text: #000000;
+  --mark: #ffffff;
+  --win: #a6a6a6;
+  --warn-bg: #1a1a1a;
+  --warn: #ffffff;
+  --good-bg: #1a1a1a;
+  --good: #ffffff;
+  --danger: #ffffff;
+  color-scheme: dark;
+}
+
+/* styles.css hard-codes --> follow the theme instead so squares remain readable in dark mode.*/
+.cell.marked,
+.cell.free,
+.cell.winning {
+  color: var(--accent-text);
+}
+
+/* Give latest question and the danger button get heavier borders. */
+.feed-item.latest { border-width: 2px; box-shadow: none; }
+button.danger { border-width: 2px; font-weight: 600; }
+
+/* Theme toggle button, pinned to the bottom-right corner */
+.theme-toggle {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 100;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--panel);
+  color: var(--text);
+  border: 2px solid var(--text);
+  font-weight: 600;
+}
+.theme-toggle:hover { background: var(--text); color: var(--bg); }
+.theme-toggle:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.theme-toggle-icon { font-size: 1.05em; line-height: 1; }
