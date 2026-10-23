@@ -3,10 +3,6 @@ import os
 import secrets
 import threading
 import time
-from datetime import datetime
-from bingocard import squares
-import firebase_admin
-from firebase_admin import auth as firebase_auth, credentials
 
 import cachecontrol
 import requests
@@ -79,9 +75,17 @@ def called_terms():
     return {c["term"] for c in game["called"]}
 
 
-# TODO set random 
-def make_card():
-    terms = random.sample(list(BANK_BY_TERM), 24)
+def make_card(game_id, player_id):
+    """Deal a card that can be rebuilt from (game id, player id) alone.
+
+    Each term is ranked by sha256("<game_id>:<player_id>:<term>") and the 24 lowest
+    fill the card in order. Order in QUESTION_BANK doesn't matter, but adding or
+    removing terms changes every card.
+    """
+    def rank(term):
+        return hashlib.sha256(f"{game_id}:{player_id}:{term}".encode()).digest()
+
+    terms = sorted(BANK_BY_TERM, key=rank)[:24]
     terms.insert(FREE_INDEX, "FREE")
     return terms
 
@@ -153,26 +157,11 @@ def server_error(err):
 
 # Player API
 
-@app.get("/api/health")
-def health():
-    return jsonify(ok=True)
-
-
-@app.get("/api/data")
-def data():
-    """Connection test from the team's starter app.py."""
-    return jsonify(
-        msg="hello world!",
-        date=datetime.now().isoformat(timespec="seconds"),
-    )
-
-
-@app.post("/api/join")
-def join():
-    data = request.get_json(silent=True) or {}
-    name = str(data.get("name", "")).strip()[:MAX_NAME_LEN]
-    if not name:
-        abort(400, description="Please enter a name.")
+@app.get("/api/player")
+def player_state():
+    """The caller's card. Their first call in each game deals them in, named from their Google account."""
+    user = current_user()
+    player_id = user["sub"]
     with lock:
         p = game["players"].get(player_id)
         if p is None:

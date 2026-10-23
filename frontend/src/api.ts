@@ -15,24 +15,12 @@ export class ApiError extends Error {
 interface ApiOptions {
   method?: string;
   body?: unknown;
-  token?: string | null; 
+  token?: string | null;
 }
 
 export async function api<T>(path: string, { method = "GET", body, token }: ApiOptions = {}): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  
-  if (token) {
-    headers["X-Admin-Token"] = token;
-  }
-
-  //IMPORTANT: This is how we can get the current user.
-  //We'll surely need to work with this Authorization header in the
-  //python script in order to have cards persist over time
-  const currentUser = auth?.currentUser;
-  if (currentUser) {
-    const firebaseToken = await currentUser.getIdToken();
-    headers["Authorization"] = `Bearer ${firebaseToken}`;
-  }
+  if (token) headers["X-Admin-Token"] = token;
 
   // Firebase refreshes the ID token itself when it is close to expiring.
   const idToken = await auth.currentUser?.getIdToken();
