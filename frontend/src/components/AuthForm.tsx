@@ -14,27 +14,26 @@ export default function AuthForm() {
   const [loading, setLoading] = useState(false);
 
   async function signIn() {
-        setError("");
-        setLoading(true);
-
-        try {
+    setError("");
+    setLoading(true);
+    try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
       const code = (err as { code?: string })?.code ?? "";
       setError(AUTH_ERRORS[code] ?? "Sign-in failed. Please try again.");
-        } finally {
-            setLoading(false);
-        }
+    } finally {
+      setLoading(false);
     }
+  }
 
-    return (
+  return (
     <div className="panel narrow">
       <h1>White Hat Bingo</h1>
       <p className="muted">Sign in with your case.edu Google account to get your card.</p>
       {error && <p className="banner warn">{error}</p>}
       <button type="button" className="primary big" onClick={signIn} disabled={loading}>
         {loading ? "Signing in…" : "Sign in with Google"}
-        </button>
+      </button>
     </div>
   );
 }
