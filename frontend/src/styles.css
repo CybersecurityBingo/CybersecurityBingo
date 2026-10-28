@@ -163,3 +163,12 @@ th { color: var(--muted); font-weight: 600; }
 .panel .account-bar { margin: 16px 0 0; }
 .toggle { margin-top: 4px; }
 .toggle button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+
+/* Small phones: give the card the width so long words like "Ransomware" fit in a square.
+   Last in the file so it overrides the base .page/.panel/.card/.cell rules. */
+@media (max-width: 400px) {
+  .page { padding-inline: 8px; }
+  .panel { padding: 10px; }
+  .card { gap: 4px; }
+  .cell { padding: 2px; }
+}
