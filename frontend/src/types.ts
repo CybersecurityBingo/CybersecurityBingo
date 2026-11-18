@@ -40,6 +40,7 @@ export interface AdminPlayer {
 }
 
 export interface AdminState {
+  exploit_enabled: boolean;
   game_id: string;
   bank: BankQuestion[];
   called: CalledQuestion[];

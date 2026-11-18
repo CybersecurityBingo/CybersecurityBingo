@@ -64,6 +64,8 @@ def fresh_game():
         "called": [],    # [{n, term, question, at}]
         "claims": [],    # [{player, name, valid, line, at}]
         "winners": [],   # [name]
+        "exploits_enabled": False, #admin exploit toggle state
+        "exploit_log": [], #[{payload, ip, at}]
     }
 
 
@@ -262,6 +264,7 @@ def admin_state():
             ],
             claims=[{k: v for k, v in c.items() if k != "player"} for c in reversed(game["claims"])],
             winners=game["winners"],
+            exploit_enabled=game["exploits_enabled"],
         )
 
 
@@ -290,6 +293,13 @@ def admin_reset():
         game = fresh_game()
     return jsonify(ok=True)
 
+@app.post("/api/admin/exploit_toggle")
+def admin_toggle():
+    require_admin()
+    with lock:
+        game["exploits_enabled"] = not(game["exploits_enabled"])
+        print("Exploits toggled! Current state: " + str(game["exploits_enabled"]))
+        return jsonify(exploit_enabled=game["exploits_enabled"])
 
 # Serve the React app (production)
 
