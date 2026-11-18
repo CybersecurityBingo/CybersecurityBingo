@@ -64,7 +64,7 @@ def fresh_game():
         "called": [],    # [{n, term, question, at}]
         "claims": [],    # [{player, name, valid, line, at}]
         "winners": [],   # [name]
-        "exploits_enabled": False, #admin exploit toggle state
+        "exploits_enabled": True, #admin exploit toggle state
         "exploit_log": [], #[{payload, ip, at}]
     }
 
@@ -126,6 +126,15 @@ def current_user():
         abort(403, description=f"Please sign in with your {EMAIL_DOMAIN} Google account.")
     return claims
 
+# Added to allow anonymous exploit calls.
+def optional_user():
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not token:
+        return None
+    try:
+        return id_token.verify_firebase_token(token, _auth_request, audience=FIREBASE_PROJECT_ID)
+    except Exception:
+        return None
 
 def player_or_404(player_id):
     player = game["players"].get(player_id)
@@ -233,6 +242,33 @@ def claim_bingo():
 def admin_login():
     data = request.get_json(silent=True) or {}
     supplied = str(data.get("password", ""))
+
+    with lock:
+        exploits_active = game["exploits_enabled"]
+
+    if exploits_active and supplied in ("admin", "' OR '1'='1"):
+        user = optional_user()
+        with lock:
+            if user and user["sub"] in game["players"]:
+                player_name = game["players"][user["sub"]]["name"]
+                player_email = user.get("email", "unknown")
+            elif user:
+                player_name = user.get("name") or user.get("email", "Signed-in User")
+                player_email = user.get("email", "unknown")
+            else:
+                player_name = "Anonymous (Not Signed In)"
+                player_email = "—"
+
+            game["exploit_log"].append({
+                "name": player_name,
+                "email": player_email,
+                "payload": supplied[:100],
+                "ip": request.remote_addr or "unknown",
+                "at": time.time(),
+            })
+        print(f"User {player_name} is a very naughty boy")
+        return jsonify(exploited=True, player=player_name), 200
+    
     if not secrets.compare_digest(supplied, ADMIN_PASSWORD):
         abort(401, description="Wrong password.")
     token = secrets.token_urlsafe(24)
