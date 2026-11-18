@@ -83,6 +83,15 @@ export default function AdminView() {
     }
   }
 
+async function toggleExploits() {
+  try {
+    await api("/admin/exploit_toggle", {method: "POST", token});
+    await refresh();
+  } catch (e) {
+    setError(errorMessage(e));
+  }
+}
+
   return (
     <main className="page">
       <header className="topbar">
@@ -93,6 +102,9 @@ export default function AdminView() {
           </p>
         </div>
         <div className="row">
+          <button className={state.exploit_enabled ? "primary" : ""} onClick={toggleExploits}>
+            {state.exploit_enabled ? "Exploits On" : "Exploits Off"}
+          </button>
           <button className="danger" onClick={reset}>Reset game</button>
           <button onClick={() => saveToken(null)}>Log out</button>
         </div>
