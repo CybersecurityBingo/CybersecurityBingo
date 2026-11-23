@@ -39,7 +39,16 @@ export interface AdminPlayer {
   won: boolean;
 }
 
+export interface ExploitAttempt {
+  name: string;
+  email: string;
+  payload: string;
+  ip: string;
+  at: number;
+}
+
 export interface AdminState {
+  exploit_enabled: boolean;
   game_id: string;
   bank: BankQuestion[];
   called: CalledQuestion[];

@@ -83,6 +83,15 @@ export default function AdminView() {
     }
   }
 
+async function toggleExploits() {
+  try {
+    await api("/admin/exploit_toggle", {method: "POST", token});
+    await refresh();
+  } catch (e) {
+    setError(errorMessage(e));
+  }
+}
+
   return (
     <main className="page">
       <header className="topbar">
@@ -93,6 +102,9 @@ export default function AdminView() {
           </p>
         </div>
         <div className="row">
+          <button className={state.exploit_enabled ? "primary" : ""} onClick={toggleExploits}>
+            {state.exploit_enabled ? "Exploits On" : "Exploits Off"}
+          </button>
           <button className="danger" onClick={reset}>Reset game</button>
           <button onClick={() => saveToken(null)}>Log out</button>
         </div>
@@ -250,15 +262,46 @@ function SendQuestion({ bank, token, onSent }: SendQuestionProps) {
 function AdminLogin({ onLogin }: { onLogin: (token: string) => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [exploitedBy, setExploitedBy] = useState<String | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     try {
-      const { token } = await api<{ token: string }>("/admin/login", { method: "POST", body: { password } });
-      onLogin(token);
+      const res = await api<{ token?: string, exploited?: Boolean, player?: string}>("/admin/login", { method: "POST", body: { password } });
+      
+      if(res.exploited) {
+        setExploitedBy(res.player || "Anonymous")
+      } else if (res.token) {
+        onLogin(res.token)
+      }
     } catch (err) {
       setError(errorMessage(err));
     }
+  }
+
+  if(exploitedBy != null){
+    return (
+      <main className="page center">
+        <div className="panel narrow" style={{textAlign: "center"}}>
+          <h1>Congratulations!</h1>
+          <p>
+            {exploitedBy}, You've successfully cracked the admin login exploit. 
+          </p>
+          <p>
+            You are very naughty.
+          </p>
+          <p>
+            Head back to your bingo card! 
+          </p>
+          <button className="primary" onClick={() =>{
+              setPassword("")
+              setExploitedBy(null)
+            }}>
+              Back to Admin Login
+          </button>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -273,3 +316,4 @@ function AdminLogin({ onLogin }: { onLogin: (token: string) => void }) {
     </main>
   );
 }
+
