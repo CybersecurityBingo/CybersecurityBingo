@@ -411,8 +411,7 @@ def register(app, *, get_game, lock, current_user, player_or_404, require_admin,
                             "<p>Open your bingo card first (signed in, in this browser), "
                             "then reload this page to get your flag.</p>", 403)
             ctf.log("opened", p["name"], "robots")
-            body = ("<p>Lesson: robots.txt is public. Listing a page there to hide it "
-                    "just advertises it.</p>" + flag_box(pid, "robots"))
+            body = ("<p>Lesson: Make sure all sensitive paths are locked behind some sort of authorization!</p>" + flag_box(pid, "robots"))
         return page("You found the secret path!", body)
 
     # Challenge "cookie": the page trusts a cookie the player can edit.
