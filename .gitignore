@@ -13,6 +13,7 @@ dist/
 
 # Environment variables and secrets
 .env
+.app_service.service.txt
 .env.*
 !.env.example
 
