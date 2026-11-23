@@ -1,4 +1,5 @@
 // Shapes of the JSON the Flask backend (backend/app.py) sends back.
+import type { CtfState } from "./ctf";
 
 export interface CalledQuestion {
   n: number;
@@ -15,6 +16,7 @@ export interface PlayerState {
   won: boolean;
   called: CalledQuestion[];
   winners: string[];
+  ctf?: CtfState;
 }
 
 export interface BingoClaim {
@@ -37,6 +39,7 @@ export interface AdminPlayer {
   marks: number[];
   line: number[] | null; // a complete marked+called line, claimed or not
   won: boolean;
+  free_squares?: number[]; 
 }
 
 export interface ExploitAttempt {
@@ -53,6 +56,6 @@ export interface AdminState {
   bank: BankQuestion[];
   called: CalledQuestion[];
   players: AdminPlayer[];
-  claims: { name: string; valid: boolean; line: number[] | null; at: number }[];
+  claims: { name: string; valid: boolean; line: number[] | null; at: number; ctf_squares?: number[] }[];
   winners: string[];
 }

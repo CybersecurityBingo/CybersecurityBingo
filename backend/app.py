@@ -103,7 +103,11 @@ def winning_line(player):
     for line in LINES:
         if all(
             i in player["marks"]
-            and (i == FREE_INDEX or player["card"][i] in called)
+            and (
+                i == FREE_INDEX
+                or i in player.get("free_squares", ())   # CTF: earned free square
+                or player["card"][i] in called
+            )
             for i in line
         ):
             return line
@@ -180,6 +184,7 @@ def player_state():
                 abort(429, description="This game is full.")
             p = game["players"][player_id] = {
                 "name": (user.get("name") or user["email"].split("@")[0])[:MAX_NAME_LEN],
+                "email": user.get("email", ""),                 # CTF: for exploit_log entries
                 "card": make_card(game["id"], player_id),
                 "card_id": card_id(game["id"], player_id),
                 "marks": {FREE_INDEX},
@@ -194,6 +199,7 @@ def player_state():
             won=p["won"],
             called=public_called(),
             winners=game["winners"],
+            ctf=CTF.player_view(player_id, p),          # CTF: side quests + credits
         )
 
 
@@ -206,6 +212,8 @@ def toggle_mark():
         abort(400, description="Invalid square.")
     with lock:
         p = player_or_404(player_id)
+        if index in p.get("free_squares", ()):          # CTF: can't un-stamp a free square
+            abort(409, description="That square was made free with a side quest.")
         # Marks are free-form on purpose --> Correctness checked when BINGO claimed.
         p["marks"].symmetric_difference_update({index})
         return jsonify(marks=sorted(p["marks"]))
@@ -224,6 +232,8 @@ def claim_bingo():
             "name": p["name"],
             "valid": line is not None,
             "line": line,
+            # CTF: which squares in the winning line came from side quests
+            "ctf_squares": [i for i in (line or []) if i in p.get("free_squares", ())],
             "at": time.time(),
         })
         if line:
@@ -266,8 +276,9 @@ def admin_login():
                 "ip": request.remote_addr or "unknown",
                 "at": time.time(),
             })
+            flag = CTF.login_exploit_flag(user)          # CTF: None if not signed in / not playing
         print(f"User {player_name} is a very naughty boy")
-        return jsonify(exploited=True, player=player_name), 200
+        return jsonify(exploited=True, player=player_name, flag=flag), 200
     
     if not secrets.compare_digest(supplied, ADMIN_PASSWORD):
         abort(401, description="Wrong password.")
@@ -295,6 +306,7 @@ def admin_state():
                     "marks": sorted(p["marks"]),
                     "line": winning_line(p),  # a complete marked+called line, claimed or not
                     "won": p["won"],
+                    "free_squares": sorted(p.get("free_squares", ())),  # CTF: stamped squares
                 }
                 for player_id, p in sorted(game["players"].items(), key=lambda kv: kv[1]["joined_at"])
             ],
@@ -336,6 +348,19 @@ def admin_toggle():
         game["exploits_enabled"] = not(game["exploits_enabled"])
         print("Exploits toggled! Current state: " + str(game["exploits_enabled"]))
         return jsonify(exploit_enabled=game["exploits_enabled"])
+
+# CTF side quests controlled by Exploits On/Off button
+import ctf  # noqa: E402
+
+CTF = ctf.register(
+    app,
+    get_game=lambda: game,      # a lambda, so it still works after a reset replaces `game`
+    lock=lock,
+    current_user=current_user,
+    player_or_404=player_or_404,
+    require_admin=require_admin,
+)
+
 
 # Serve the React app (production)
 

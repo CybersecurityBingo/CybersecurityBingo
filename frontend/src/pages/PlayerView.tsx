@@ -5,7 +5,9 @@ import { useAuth } from "../AuthContext";
 import AccountBar from "../components/AccountBar";
 import AuthForm from "../components/AuthForm";
 import BingoCard from "../components/BingoCard";
+import FlagEntry from "../components/FlagEntry";
 import QuestionFeed from "../components/QuestionFeed";
+import { applyCtfPatch, useSideQuests } from "../ctf";
 import type { BingoClaim, PlayerState } from "../types";
 
 export default function PlayerView() {
@@ -31,12 +33,17 @@ function PlayerGame() {
   const [state, setState] = useState<PlayerState>();
   const [connError, setConnError] = useState("");
   const [claim, setClaim] = useState<BingoClaim | null>(null);
+  // CTF side quests. Must stay above the `if (!state) return` below.
+  const quests = useSideQuests((p) => setState((s) => applyCtfPatch(s, p)));
 
   async function refresh() {
     try {
       const next = await api<PlayerState>("/player");
       // A new card ID means the host reset the game, so the old claim no longer applies.
-      if (next.card_id !== state?.card_id) setClaim(null);
+      if (next.card_id !== state?.card_id) {
+        setClaim(null);
+        quests.setPicking(false);
+      }
       setState(next);
       setConnError("");
     } catch (e) {
@@ -104,9 +111,11 @@ function PlayerGame() {
           <BingoCard
             card={state.card}
             marks={state.marks}
-            onToggle={toggle}
+            onToggle={quests.picking ? quests.stamp : toggle}
             winLine={claim?.line || []}
             disabled={state.won}
+            freeSquares={state.ctf?.free_squares ?? []}
+            picking={quests.picking && !state.won}
           />
           {state.won ? (
             <p className="banner good">You have BINGO! Show this code to the host: <code>{state.card_id}</code></p>
@@ -123,6 +132,8 @@ function PlayerGame() {
             <QuestionFeed called={state.called} emptyText="Waiting for the host to send the first question…" />
           </div>
         </section>
+
+        <FlagEntry ctf={state.ctf} won={state.won} quests={quests} />
       </div>
     </main>
   );

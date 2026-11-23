@@ -5,12 +5,22 @@ import BingoCard from "../components/BingoCard";
 import QuestionFeed from "../components/QuestionFeed";
 import type { AdminPlayer, AdminState, BankQuestion, CalledQuestion } from "../types";
 
+// GET /api/admin/ctf
+interface CtfAdminState {
+  enabled: boolean;
+  max_free: number;
+  challenges: { id: string; title: string; solves: number }[];
+  players: { name: string; solved: string[]; free_squares: number }[];
+  events: { kind: "opened" | "solved" | "shared" | "used"; name: string; challenge: string | null; detail: string; at: number }[];
+}
+
 const boardStatus = (p: AdminPlayer) => (p.won ? "🏆 Winner" : p.line ? "Has BINGO, not claimed" : "Playing");
 
 // Read-only card plus what the host needs to rebuild it (see backend/README.md).
 function PlayerBoard({ player, calledTerms }: { player: AdminPlayer; calledTerms: Set<string> }) {
   const [showAnswers, setShowAnswers] = useState(false);
-  const answers = player.card.flatMap((t, i) => (t === "FREE" || calledTerms.has(t) ? [i] : []));
+  const free = new Set(player.free_squares ?? []); // CTF: stamped squares count as called
+  const answers = player.card.flatMap((t, i) => (t === "FREE" || calledTerms.has(t) || free.has(i) ? [i] : []));
 
   return (
     <>
@@ -25,7 +35,13 @@ function PlayerBoard({ player, calledTerms }: { player: AdminPlayer; calledTerms
           Called answers
         </button>
       </div>
-      <BingoCard card={player.card} marks={showAnswers ? answers : player.marks} winLine={player.line ?? []} disabled />
+      <BingoCard
+        card={player.card}
+        marks={showAnswers ? answers : player.marks}
+        winLine={player.line ?? []}
+        freeSquares={player.free_squares ?? []}
+        disabled
+      />
     </>
   );
 }
@@ -102,7 +118,11 @@ async function toggleExploits() {
           </p>
         </div>
         <div className="row">
-          <button className={state.exploit_enabled ? "primary" : ""} onClick={toggleExploits}>
+          <button
+            className={state.exploit_enabled ? "primary" : ""}
+            onClick={toggleExploits}
+            title="Turns the side-quest challenges, the admin-login exploit and flag entry on or off"
+          >
             {state.exploit_enabled ? "Exploits On" : "Exploits Off"}
           </button>
           <button className="danger" onClick={reset}>Reset game</button>
@@ -132,12 +152,17 @@ async function toggleExploits() {
               {state.claims.map((c, i) => (
                 <li key={i} className={c.valid ? "good-text" : "warn-text"}>
                   {c.valid ? "✔ Valid" : "✘ Rejected"} — {c.name}
+                  {c.ctf_squares && c.ctf_squares.length > 0 && (
+                    <span className="muted"> · ⚑ {c.ctf_squares.length} side-quest square{c.ctf_squares.length > 1 ? "s" : ""}</span>
+                  )}
                   <span className="muted"> · {new Date(c.at * 1000).toLocaleTimeString()}</span>
                 </li>
               ))}
             </ul>
           )}
         </section>
+
+        <SideQuestsPanel token={token} />
 
         <section className="panel" aria-labelledby="players-h">
           <h2 id="players-h">Players ({state.players.length})</h2>
@@ -259,18 +284,69 @@ function SendQuestion({ bank, token, onSent }: SendQuestionProps) {
   );
 }
 
+// CTF: who solved what, plus a live log (shared flags are worth a word with the player).
+function SideQuestsPanel({ token }: { token: string }) {
+  const [ctf, setCtf] = useState<CtfAdminState | null>(null);
+
+  usePolling(async () => {
+    try {
+      setCtf(await api<CtfAdminState>("/admin/ctf", { token }));
+    } catch {
+      /* the main state poll already reports connection problems */
+    }
+  }, 3000);
+
+  if (!ctf) return null;
+  const label: Record<CtfAdminState["events"][number]["kind"], string> = {
+    opened: "found", solved: "redeemed", shared: "⚠ tried someone else's flag for", used: "stamped",
+  };
+  const title = (id: string | null) => ctf.challenges.find((c) => c.id === id)?.title ?? "";
+
+  return (
+    <section className="panel" aria-labelledby="ctf-h">
+      <h2 id="ctf-h">Side quests {ctf.enabled ? "" : "(paused)"}</h2>
+      <table>
+        <thead><tr><th>Challenge</th><th>Solves</th></tr></thead>
+        <tbody>
+          {ctf.challenges.map((c) => (
+            <tr key={c.id}><td>{c.title}</td><td>{c.solves}</td></tr>
+          ))}
+        </tbody>
+      </table>
+      <h3>Recent activity</h3>
+      {ctf.events.length === 0 ? (
+        <p className="muted">Nothing yet.</p>
+      ) : (
+        <ul className="list">
+          {ctf.events.slice(0, 15).map((e, i) => (
+            <li key={i} className={e.kind === "shared" ? "warn-text" : undefined}>
+              {e.name} {label[e.kind]} {e.kind === "used" ? e.detail : `“${title(e.challenge)}”`}
+              {e.kind === "shared" && <span className="muted"> ({e.detail})</span>}
+              <span className="muted"> · {new Date(e.at * 1000).toLocaleTimeString()}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function AdminLogin({ onLogin }: { onLogin: (token: string) => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [exploitedBy, setExploitedBy] = useState<String | null>(null);
+  const [exploitedBy, setExploitedBy] = useState<string | null>(null);
+  const [exploitFlag, setExploitFlag] = useState<string | null>(null);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     try {
-      const res = await api<{ token?: string, exploited?: Boolean, player?: string}>("/admin/login", { method: "POST", body: { password } });
-      
-      if(res.exploited) {
-        setExploitedBy(res.player || "Anonymous")
+      const res = await api<{ token?: string; exploited?: boolean; player?: string; flag?: string | null }>(
+        "/admin/login", { method: "POST", body: { password } }
+      );
+
+      if (res.exploited) {
+        setExploitedBy(res.player || "Anonymous");
+        setExploitFlag(res.flag ?? null);
       } else if (res.token) {
         onLogin(res.token)
       }
@@ -290,12 +366,22 @@ function AdminLogin({ onLogin }: { onLogin: (token: string) => void }) {
           <p>
             You are very naughty.
           </p>
+          {exploitFlag ? (
+            <>
+              <p>Your flag (unique to you):</p>
+              <p><code className="ctf-flag-reveal">{exploitFlag}</code></p>
+              <p>Paste it into the Side quests box on your bingo card to earn a free square.</p>
+            </>
+          ) : (
+            <p>Sign in and open your bingo card first, then try again to get a flag for it.</p>
+          )}
           <p>
             Head back to your bingo card! 
           </p>
           <button className="primary" onClick={() =>{
               setPassword("")
               setExploitedBy(null)
+              setExploitFlag(null)
             }}>
               Back to Admin Login
           </button>

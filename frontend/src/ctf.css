@@ -1,0 +1,221 @@
+/* CTF side quests: flag entry box, free-square stamps, "pick a square" mode.
+   Import after styles.css and theme.css. Uses theme's variables, to follow light/dark mode */
+
+:root {
+  --ctf-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --ctf-line: 2px;
+}
+
+/* Panel layout */
+
+.ctf { display: grid; gap: 12px; }
+.ctf .muted.small { margin: 0; }
+
+.ctf-head {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  align-items: center; justify-content: space-between;
+}
+.ctf-head h2 { margin: 0; }
+
+.ctf-credits {
+  font-size: 0.82rem; font-weight: 700;
+  padding: 3px 10px;
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ctf-credits[data-ready] {
+  border: var(--ctf-line) solid var(--text);
+  background: var(--text);
+  color: var(--bg);
+}
+
+/* Flag entry box */
+
+.flag-form { display: grid; gap: 6px; }
+
+.flag-field {
+  display: flex;
+  align-items: stretch;
+  border: var(--ctf-line) solid var(--text);
+  background: var(--bg);
+  transition: box-shadow 120ms ease;
+}
+.flag-field:focus-within {
+  outline: var(--ctf-line) solid var(--text);
+  outline-offset: 2px;
+}
+
+.flag-field-icon {
+  display: grid; place-items: center;
+  padding: 0 10px;
+  font-size: 1.05rem;
+  border-right: var(--ctf-line) solid var(--text);
+  background: var(--text);
+  color: var(--bg);
+}
+
+/* Reset the global `input` rule from styles.css inside the field. */
+.flag-field .flag-input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 11px 12px;
+  font-family: var(--ctf-mono);
+  font-size: 16px;            /* 16px+ stops iOS zooming in on focus */
+  letter-spacing: 0.03em;
+  caret-color: var(--text);
+}
+.flag-field .flag-input:focus { outline: none; }
+.flag-field .flag-input::placeholder { color: var(--muted); opacity: 0.7; }
+
+.flag-field .flag-submit {
+  border: 0;
+  border-left: var(--ctf-line) solid var(--text);
+  background: var(--text);
+  color: var(--bg);
+  padding: 0 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+}
+.flag-field .flag-submit:hover:not(:disabled) { background: var(--bg); color: var(--text); }
+.flag-field .flag-submit:focus-visible { outline: var(--ctf-line) solid var(--bg); outline-offset: -5px; }
+.flag-field .flag-submit:disabled { opacity: 1; background: var(--bg); color: var(--muted); }
+
+/* States: shown with border style + a feedback icon, not color. */
+.flag-field[data-state="busy"]    { border-style: dotted; }
+.flag-field[data-state="error"]   { border-style: dashed; }
+.flag-field[data-state="success"] { box-shadow: 0 0 0 var(--ctf-line) var(--bg), 0 0 0 calc(var(--ctf-line) * 2) var(--text); }
+
+.flag-field.is-shaking { animation: flag-shake 320ms ease; }
+@keyframes flag-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+.flag-feedback {
+  margin: 0;
+  min-height: 1.4em;          /* reserve space so the panel doesn't jump */
+  font-size: 0.9rem;
+}
+.flag-feedback[data-kind="success"] { color: var(--good); font-weight: 600; }
+.flag-feedback[data-kind="error"]   { color: var(--warn); }
+
+/* Narrow phones: put the Submit button under the input. */
+@media (max-width: 380px) {
+  .flag-field { flex-wrap: wrap; }
+  .flag-field .flag-input { flex-basis: calc(100% - 44px); }
+  .flag-field .flag-submit {
+    flex-basis: 100%;
+    padding: 10px;
+    border-left: 0;
+    border-top: var(--ctf-line) solid var(--text);
+  }
+}
+
+/* Spend a credit */
+
+.ctf-spend { display: grid; gap: 8px; }
+.ctf-spend p { margin: 0; }
+.ctf-spend[data-picking] {
+  padding: 10px 12px;
+  border: var(--ctf-line) dashed var(--text);
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+/* Challenge list */
+
+.ctf-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.ctf-item { border-top: 1px solid var(--border); }
+.ctf-item:last-child { border-bottom: 1px solid var(--border); }
+.ctf-item summary {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 2px;
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+.ctf-item summary::-webkit-details-marker { display: none; }
+.ctf-item summary::after { content: "+"; margin-left: auto; color: var(--muted); }
+.ctf-item details[open] summary::after { content: "−"; }
+.ctf-item summary:focus-visible { outline: var(--ctf-line) solid var(--text); outline-offset: 2px; }
+.ctf-item details p { margin: 0 0 10px 30px; }
+
+.ctf-check {
+  width: 20px; height: 20px; flex: none;
+  display: grid; place-items: center;
+  border: var(--ctf-line) solid var(--text);
+  font-size: 0.8rem; line-height: 1;
+}
+.ctf-item.solved .ctf-check { background: var(--text); color: var(--bg); }
+.ctf-item.solved .ctf-title { text-decoration: line-through; text-decoration-thickness: 1px; }
+
+.ctf-progress { text-align: right; }
+
+/* Bingo card: CTF free squares */
+
+/* Same fill as a marked square, plus an inner double border and a ⚑ badge,
+   so it reads as "stamped" without needing color. */
+.cell.ctf-free {
+  position: relative;
+  background: var(--mark);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 3px var(--mark), inset 0 0 0 5px var(--accent-text);
+  opacity: 1;                 /* it's disabled, but shouldn't look faded */
+  cursor: default;
+}
+.cell.ctf-free::after {
+  content: "⚑";
+  position: absolute; top: 4px; right: 6px;
+  font-size: 0.8em; line-height: 1;
+}
+.cell.ctf-free.winning { background: var(--win); box-shadow: inset 0 0 0 3px var(--win), inset 0 0 0 5px var(--accent-text); }
+
+/* Bingo card: pick-a-square mode */
+
+.card.picking {
+  outline: var(--ctf-line) dashed var(--text);
+  outline-offset: 6px;
+}
+.card.picking .cell:not(.free):not(.ctf-free):not(:disabled) {
+  cursor: crosshair;
+  background-image: repeating-linear-gradient(
+    135deg, transparent 0 7px, color-mix(in srgb, var(--text) 14%, transparent) 7px 9px
+  );
+}
+.card.picking .cell:not(.free):not(.ctf-free):not(:disabled):hover,
+.card.picking .cell:not(.free):not(.ctf-free):not(:disabled):focus-visible {
+  outline: 3px solid var(--text);
+  outline-offset: -3px;
+}
+
+/* Utilities + motion */
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flag-field.is-shaking { animation: none; }
+  .flag-field { transition: none; }
+}
+
+/* Flag shown on the admin-login exploit screen */
+
+.ctf-flag-reveal {
+  display: inline-block;
+  padding: 8px 12px;
+  border: var(--ctf-line) dashed var(--text);
+  font-family: var(--ctf-mono);
+  user-select: all;           /* one click selects the whole flag */
+  word-break: break-all;
+}

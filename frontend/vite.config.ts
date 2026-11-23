@@ -11,6 +11,8 @@ export default defineConfig({
     proxy: {
       // Node can resolve localhost to the IPv6 address ::1, which Flask (listening on IPv4) never answers.
       '/api': 'http://127.0.0.1:5001',
+      // CTF challenge pages are plain Flask pages (backend/ctf.py challenge_route); keep this list in sync.
+      '^/(robots\\.txt|secret_path|staff-panel|printer)(\\?|$)': 'http://127.0.0.1:5001',
     },
   },
 })
